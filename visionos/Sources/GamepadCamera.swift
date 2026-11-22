@@ -40,7 +40,7 @@ struct GamepadCamera {
     }
 
     private static let deadZone: Float = 0.18
-    private static let walkSpeed: Float = 0.85
+    private static let moveSpeed: Float = 0.85
     private static let yawSpeed: Float = 75 * .pi / 180
     private static let pitchSpeed: Float = 55 * .pi / 180
     private static let pitchLimit: Float = 60 * .pi / 180
@@ -64,32 +64,33 @@ struct GamepadCamera {
 
         let head = SIMD3<Float>(physicalHead.columns.3.x, physicalHead.columns.3.y,
                                physicalHead.columns.3.z)
-        let back = physicalHead.columns.2
+        let axis = physicalHead.columns.2
+        let back = SIMD3<Float>(axis.x, axis.y, axis.z)
         if simd_length_squared(SIMD2(back.x, back.z)) > 0.0001 {
             physicalYaw = atan2(back.x, back.z)
         }
 
-        if let previousTime, time > previousTime, time - previousTime <= 0.1 {
-            let dt = Float(time - previousTime)
-            let look = Self.filtered(input.look)
-            let move = Self.filtered(input.move)
-            let oldYaw = simd_quatf(angle: yaw, axis: Self.up)
-            yaw = (yaw - look.x * Self.yawSpeed * dt).remainder(dividingBy: 2 * .pi)
-            pitch = min(Self.pitchLimit, max(-Self.pitchLimit, pitch + look.y * Self.pitchSpeed * dt))
-            let newYaw = simd_quatf(angle: yaw, axis: Self.up)
-            let heading = simd_quatf(angle: yaw + physicalYaw, axis: Self.up)
-            // Turn around the current head position, even when the player has
-            // walked away from ARKit's origin. Walk along the view's horizontal plane.
-            offset += oldYaw.act(head) - newYaw.act(head)
-            let travel = Self.walkSpeed * input.speedMultiplier * dt
-            offset += heading.act(SIMD3(move.x, 0, -move.y)) * travel
-        }
+        let elapsed = previousTime.map { time - $0 } ?? 0
+        let dt = elapsed > 0 && elapsed <= 0.1 ? Float(elapsed) : 0
         previousTime = time
 
-        guard yaw != 0 || pitch != 0 || offset != .zero else { return nil }
+        let look = Self.filtered(input.look)
+        let oldTurn = simd_quatf(angle: yaw, axis: Self.up)
+        yaw = (yaw - look.x * Self.yawSpeed * dt).remainder(dividingBy: 2 * .pi)
+        pitch = min(Self.pitchLimit, max(-Self.pitchLimit, pitch + look.y * Self.pitchSpeed * dt))
         let turn = simd_quatf(angle: yaw, axis: Self.up)
         let right = simd_quatf(angle: physicalYaw, axis: Self.up).act(SIMD3(1, 0, 0))
         let rotation = turn * simd_quatf(angle: pitch, axis: right)
+        // Turn about the current head. Use the final camera direction for
+        // forward/back travel and keep the strafe axis horizontal.
+        offset += oldTurn.act(head) - turn.act(head)
+        let move = Self.filtered(input.move)
+        if dt > 0, move != .zero {
+            let direction = turn.act(right) * move.x - rotation.act(back) * move.y
+            offset += direction * (Self.moveSpeed * input.speedMultiplier * dt)
+        }
+
+        guard yaw != 0 || pitch != 0 || offset != .zero else { return nil }
         let virtualHead = turn.act(head) + offset
         // Pitch tilts the view and hands about the head without moving the
         // head up or down as the player walks in physical space.

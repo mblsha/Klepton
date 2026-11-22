@@ -61,6 +61,23 @@ enum GamepadCameraTest {
         let projectedHand = tilt.matrix * SIMD4(hand, 1)
         near(SIMD3(projectedHand.x, projectedHand.y, projectedHand.z), tilt.point(hand))
 
+        var pitchedMovement = turn
+        let viewForward = tilt.rotation.act(physicalYaw.act(forward))
+        let ascent = pitchedMovement.update(.init(move: SIMD2(0, 1)), physicalHead: physical, at: 3.05)!
+        near(ascent.point(head), head + viewForward * (0.85 * 0.05))
+        let back = pitchedMovement.update(.init(move: SIMD2(0, -1)), physicalHead: physical, at: 3.10)!
+        near(back.point(head), head)
+        let sideways = pitchedMovement.update(.init(move: SIMD2(1, 0)), physicalHead: physical, at: 3.15)!
+        near(sideways.point(head), head + simd_normalize(simd_cross(viewForward, up)) * (0.85 * 0.05))
+
+        var physicalLook = GamepadCamera()
+        let down = simd_quatf(angle: -.pi / 4, axis: SIMD3<Float>(1, 0, 0))
+        var lookingDown = simd_float4x4(physicalYaw * down)
+        lookingDown.columns.3 = SIMD4(head, 1)
+        _ = physicalLook.update(.init(), physicalHead: lookingDown, at: 0)
+        let descended = physicalLook.update(.init(move: SIMD2(0, 1)), physicalHead: lookingDown, at: 0.05)!
+        near(descended.point(head), head + (physicalYaw * down).act(forward) * (0.85 * 0.05))
+
         physical.columns.3.x += 1
         let afterPhysicalStep = turn.update(.init(), physicalHead: physical, at: 3.05)!
         precondition(abs(afterPhysicalStep.point(head + SIMD3(1, 0, 0)).y - head.y) < 0.0001)
@@ -76,6 +93,6 @@ enum GamepadCameraTest {
         let movedHead = head + SIMD3<Float>(1, 0, 0)
         near(afterReset.point(movedHead), movedHead + physicalYaw.act(forward) * (0.85 * 0.05))
         near(afterReset.rotation.act(forward), forward)
-        print("PASS: dead zone, movement and look, boost tiers, tracked hand registration, disconnect, resume and reset")
+        print("PASS: camera-relative ascent and descent, level strafe, boosts, hand registration and reset")
     }
 }

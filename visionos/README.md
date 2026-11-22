@@ -76,7 +76,8 @@ assigned profile, and `KL_BARE_HAND_ALIGN=1` enables its palm calibration
 when one is provided. Physical controllers retain priority per hand.
 
 `gamepad_camera` lets an opted-in target use a standard extended gamepad's
-left stick for horizontal movement and right stick for yaw and pitch. Hold
+left stick for movement and right stick for yaw and pitch. Forward and back
+follow the camera's pitch, and side-to-side movement stays level. Hold
 either trigger for double movement speed, or both for quadruple speed. Click
 the right stick to reset the gamepad's position and look offsets. The guest's
 head and hands share those offsets and continue to track physical motion.
