@@ -336,6 +336,9 @@ final class KleptonCompositor {
     private let handTracking = HandTrackingProvider()
     private let controllers = KleptonControllers()
     private var arRunning = false
+    private var gamepadCamera: GamepadCamera?
+    private var cameraTransform: GuestTrackingTransform?
+    private var lastCameraPoseTag: UInt64 = 0
 
     // How much work reprojection is doing, sampled for the log.
     private var reprojectFrames = 0
@@ -517,6 +520,11 @@ final class KleptonCompositor {
     init(_ layerRenderer: LayerRenderer) {
         self.layerRenderer = layerRenderer
 
+        if kl_app_target_gamepad_camera() != 0, klEnvOn("KL_GAMEPAD_CAMERA", default: true) {
+            gamepadCamera = GamepadCamera()
+        }
+        Self.cameraPredictionLock.withLock { Self.cameraTransformForPrediction = nil }
+
         // The system's own pinch, rather than our arithmetic on two fingertip
         // joints. `onSpatialEvent` is how a fully-immersive Metal app is told
         // that the user selected something — the same recogniser the rest of
@@ -633,7 +641,7 @@ final class KleptonCompositor {
     private func originFromDevice(_ anchor: DeviceAnchor?) -> simd_float4x4 {
         if let anchor {
             lastGoodOriginFromDevice = anchor.originFromAnchorTransform
-            return recenterXform * anchor.originFromAnchorTransform
+            return displayTransform(anchor.originFromAnchorTransform)
         }
         guard holdAnchor, let held = lastGoodOriginFromDevice else {
             // Nothing has ever tracked — the frames before ARKit starts — or the
@@ -643,7 +651,11 @@ final class KleptonCompositor {
             return matrix_identity_float4x4
         }
         anchorHeld += 1
-        return recenterXform * held
+        return displayTransform(held)
+    }
+
+    private func displayTransform(_ physical: simd_float4x4) -> simd_float4x4 {
+        recenterXform * (cameraTransform.map { $0.matrix * physical } ?? physical)
     }
 
     /// Sample every pose for this frame and push it across the seam.
@@ -665,6 +677,11 @@ final class KleptonCompositor {
     private var poseAnchors = [(tag: UInt64, anchor: DeviceAnchor)?](
         repeating: nil, count: poseAnchorRing)
     private var poseTag: UInt64 = 0
+
+    private func canUseSystemWarp(forPoseTag tag: UInt64) -> Bool {
+        // A frame from before a reset can still be on screen after the offset clears.
+        Self.warpBySystem && cameraTransform == nil && (lastCameraPoseTag == 0 || tag > lastCameraPoseTag)
+    }
 
     private func poseAnchor(tag: UInt64) -> DeviceAnchor? {
         guard tag != 0 else { return nil }
@@ -705,8 +722,16 @@ final class KleptonCompositor {
             // originFromHead. The guest derives its eye positions from this
             // pose and the offsets pushEyeOffsets sent, and those two have to
             // be stated about one origin or every near object sits wrong.
-            let (p, q) = Self.decompose(
-                Self.headFrom(anchor.originFromAnchorTransform, midpoint: eyeMidpointInDevice))
+            let head = Self.headFrom(anchor.originFromAnchorTransform, midpoint: eyeMidpointInDevice)
+            if gamepadCamera != nil {
+                let input = GamepadCamera.readInput()
+                if input.reset, cameraTransform != nil { kl_ovrp_reset_motion_history() }
+                cameraTransform = gamepadCamera?.update(input, physicalHead: head, at: presentationTime)
+                if cameraTransform != nil { lastCameraPoseTag = poseTag }
+                Self.cameraPredictionLock.withLock { Self.cameraTransformForPrediction = cameraTransform }
+            }
+            let physical = Self.decompose(head)
+            let (p, q) = cameraTransform?.pose(physical) ?? physical
             kl_ovrp_set_head_pose(p.x, p.y, p.z, q.imag.x, q.imag.y, q.imag.z, q.real)
         }
 
@@ -745,7 +770,7 @@ final class KleptonCompositor {
             if let a = hands.leftHand,  a.isTracked { left  = a }
             if let a = hands.rightHand, a.isTracked { right = a }
         }
-        controllers.update(leftHand: left, rightHand: right, at: presentationTime)
+        controllers.update(leftHand: left, rightHand: right, trackingTransform: cameraTransform, at: presentationTime)
         // ...and the same seam in the other direction: whatever the guest
         // queued for the controllers to play. Here rather than inside `update`
         // because it has nothing to do with the anchors that call takes — it is
@@ -2089,11 +2114,14 @@ final class KleptonCompositor {
         // The fallback is `ours` in all but name: no cached anchor (the guest's
         // frame predates the first push, or the tag has rolled out of the ring)
         // means the display anchor and the correction we always did.
-        let renderAnchor = Self.warpBySystem && haveRendered
+        // A physical anchor cannot describe gamepad motion. Reproject that
+        // motion here and continue giving the system a physical display anchor.
+        let systemWarp = canUseSystemWarp(forPoseTag: rendered.pose_tag)
+        let renderAnchor = systemWarp && haveRendered
             ? poseAnchor(tag: rendered.pose_tag) : nil
         let drawableAnchor = renderAnchor ?? displayAnchor
         let warpOriginFromDevice = renderAnchor?.originFromAnchorTransform ?? displayFromOrigin
-        if Self.warpBySystem && !loggedWarpArm && haveRendered {
+        if systemWarp && !loggedWarpArm && haveRendered {
             loggedWarpArm = true
             NSLog("[cp] KL_WARP=system: the drawable is stamped with the pose "
                   + "freeze's own anchor and our model-view is neutral — the "
@@ -3716,6 +3744,8 @@ final class KleptonCompositor {
     /// Static because kl_ovrp takes a plain C function pointer, which cannot
     /// capture. Written once during setup and only read afterwards.
     nonisolated(unsafe) static var headAtTracker: WorldTrackingProvider?
+    private static let cameraPredictionLock = NSLock()
+    nonisolated(unsafe) private static var cameraTransformForPrediction: GuestTrackingTransform?
 
     /// A head pose for an instant, for `kl_ovrp_set_head_at`.
     ///
@@ -3745,12 +3775,14 @@ final class KleptonCompositor {
             steps += 1
         }
         guard let a = anchor else { return 0 }
-        let (p, q) = KleptonCompositor.decompose(a.originFromAnchorTransform)
         // Head space, matching every other pose this file publishes.
         let m = KleptonCompositor.headFrom(a.originFromAnchorTransform,
                                            midpoint: KleptonCompositor.headAtMidpoint)
-        let (hp, hq) = KleptonCompositor.decompose(m)
-        _ = p; _ = q
+        let physical = KleptonCompositor.decompose(m)
+        let transform = KleptonCompositor.cameraPredictionLock.withLock {
+            KleptonCompositor.cameraTransformForPrediction
+        }
+        let (hp, hq) = transform?.pose(physical) ?? physical
         out[0] = hq.imag.x; out[1] = hq.imag.y; out[2] = hq.imag.z; out[3] = hq.real
         out[4] = hp.x;      out[5] = hp.y;      out[6] = hp.z
         return 1
@@ -4515,7 +4547,7 @@ final class KleptonCompositor {
                 presentMispairs += 1
                 presentWorstMispair = max(presentWorstMispair, live - r.stage_epoch)
             }
-            if Self.warpBySystem && !anchorHit { presentAnchorMisses += 1 }
+            if canUseSystemWarp(forPoseTag: r.pose_tag) && !anchorHit { presentAnchorMisses += 1 }
             lastPresentedRecord = r
         } else {
             presentNoRecord += 1

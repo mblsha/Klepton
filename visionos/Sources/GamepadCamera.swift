@@ -1,0 +1,113 @@
+import Foundation
+import simd
+
+#if os(visionOS)
+import GameController
+#endif
+
+struct GamepadCamera {
+    struct Input {
+        var move: SIMD2<Float> = .zero
+        var look: SIMD2<Float> = .zero
+        var leftTrigger = false
+        var rightTrigger = false
+        var reset = false
+
+        var speedMultiplier: Float {
+            switch (leftTrigger, rightTrigger) {
+            case (true, true): return 4
+            case (false, false): return 1
+            default: return 2
+            }
+        }
+    }
+
+    private static let deadZone: Float = 0.18
+    private static let moveSpeed: Float = 0.85
+    private static let yawSpeed: Float = 75 * .pi / 180
+    private static let pitchSpeed: Float = 55 * .pi / 180
+    private static let pitchLimit: Float = 60 * .pi / 180
+    private static let up = SIMD3<Float>(0, 1, 0)
+
+    private var previousTime: TimeInterval?
+    private var yaw: Float = 0
+    private var pitch: Float = 0
+    private var physicalYaw: Float = 0
+    private var offset: SIMD3<Float> = .zero
+
+    mutating func update(_ input: Input, physicalHead: simd_float4x4,
+                         at time: TimeInterval) -> GuestTrackingTransform? {
+        if input.reset {
+            yaw = 0
+            pitch = 0
+            offset = .zero
+            previousTime = time
+            return nil
+        }
+
+        let head = SIMD3<Float>(physicalHead.columns.3.x, physicalHead.columns.3.y,
+                               physicalHead.columns.3.z)
+        let axis = physicalHead.columns.2
+        let back = SIMD3<Float>(axis.x, axis.y, axis.z)
+        if simd_length_squared(SIMD2(back.x, back.z)) > 0.0001 {
+            physicalYaw = atan2(back.x, back.z)
+        }
+
+        let elapsed = previousTime.map { time - $0 } ?? 0
+        let dt = elapsed > 0 && elapsed <= 0.1 ? Float(elapsed) : 0
+        previousTime = time
+
+        let look = Self.filtered(input.look)
+        let oldTurn = simd_quatf(angle: yaw, axis: Self.up)
+        yaw = (yaw - look.x * Self.yawSpeed * dt).remainder(dividingBy: 2 * .pi)
+        pitch = min(Self.pitchLimit, max(-Self.pitchLimit, pitch + look.y * Self.pitchSpeed * dt))
+        let turn = simd_quatf(angle: yaw, axis: Self.up)
+        let right = simd_quatf(angle: physicalYaw, axis: Self.up).act(SIMD3(1, 0, 0))
+        let rotation = turn * simd_quatf(angle: pitch, axis: right)
+        // Turn about the current head. Use the final camera direction for
+        // forward/back travel and keep the strafe axis horizontal.
+        offset += oldTurn.act(head) - turn.act(head)
+        let move = Self.filtered(input.move)
+        if dt > 0, move != .zero {
+            let direction = turn.act(right) * move.x - rotation.act(back) * move.y
+            offset += direction * (Self.moveSpeed * input.speedMultiplier * dt)
+        }
+
+        guard yaw != 0 || pitch != 0 || offset != .zero else { return nil }
+        let virtualHead = turn.act(head) + offset
+        // Pitch tilts the view and hands about the head without moving the
+        // head up or down as the player walks in physical space.
+        return GuestTrackingTransform(rotation: rotation,
+                                       translation: virtualHead - rotation.act(head))
+    }
+
+    private static func filtered(_ axes: SIMD2<Float>) -> SIMD2<Float> {
+        let length = simd_length(axes)
+        guard length.isFinite, length > deadZone else { return .zero }
+        let magnitude = (min(length, 1) - deadZone) / (1 - deadZone)
+        return axes * (magnitude / length)
+    }
+}
+
+#if os(visionOS)
+extension GamepadCamera {
+    /// Sample a standard gamepad without consuming either spatial controller's stick.
+    static func readInput() -> Input {
+        let pads = GCController.controllers().filter { controller in
+            guard controller.extendedGamepad != nil else { return false }
+            if #available(visionOS 26.0, *), controller.productCategory == GCProductCategorySpatialController {
+                return false
+            }
+            return true
+        }
+        let current = GCController.current
+        guard let gamepad = (pads.first { $0 === current } ?? pads.first)?.extendedGamepad else {
+            return .init()
+        }
+        return .init(move: SIMD2(gamepad.leftThumbstick.xAxis.value, gamepad.leftThumbstick.yAxis.value),
+                     look: SIMD2(gamepad.rightThumbstick.xAxis.value, gamepad.rightThumbstick.yAxis.value),
+                     leftTrigger: gamepad.leftTrigger.isPressed, rightTrigger: gamepad.rightTrigger.isPressed,
+                     reset: gamepad.rightThumbstickButton?.isPressed == true)
+    }
+}
+#endif

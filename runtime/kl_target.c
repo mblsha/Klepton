@@ -9,8 +9,8 @@
 #include "kl_jni.h"
 #include "kl_target.h"
 
-#define KL_TARGET_ROW(name, tree, apk, assets, libdir, entry, userdata, obb, kind) \
-    { name, tree, apk, assets, libdir, entry, userdata, obb, kind },
+#define KL_TARGET_ROW(name, tree, apk, assets, libdir, entry, userdata, obb, kind, camera) \
+    { name, tree, apk, assets, libdir, entry, userdata, obb, kind, camera },
 static const kl_target TARGETS[] = {
 #include "kl_target_table.h"
 };

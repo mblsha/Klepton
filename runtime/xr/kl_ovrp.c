@@ -2547,6 +2547,12 @@ typedef struct {
 } klovrp_motion_hist;
 static klovrp_motion_hist g_head_hist, g_hand_hist[2];
 
+void kl_ovrp_reset_motion_history(void) {
+    g_head_hist.have = 0;
+    g_hand_hist[0].have = 0;
+    g_hand_hist[1].have = 0;
+}
+
 static double klovrp_mono_now(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -5205,17 +5211,22 @@ static int klovrp_hand_present(int hand) {
     if (inview) return 1;
     return __atomic_load_n(&g_hand_set[hand], __ATOMIC_ACQUIRE) ? 1 : 0;
 }
-void kl_ovrp_set_hand_pose(int hand, float px, float py, float pz,
-                           float qx, float qy, float qz, float qw) {
+void kl_ovrp_set_hand_pose_at(int hand, float px, float py, float pz,
+                              float qx, float qy, float qz, float qw, double time_s) {
     if ((unsigned)hand > 1) return;
     py -= klovrp_origin_y();          // the same space the head is filed in
     klovrp_pose v = { px, py, pz, qx, qy, qz, qw, 0, 0, 0, 0, 0, 0, 0, 0 };
-    klovrp_derive_motion(&v, &g_hand_hist[hand], 0);
+    klovrp_derive_motion(&v, &g_hand_hist[hand], time_s);
     klovrp_pose_write(&g_hand_pose[hand], &v);
     __atomic_store_n(&g_hand_set[hand], 1, __ATOMIC_RELEASE);
     float e[3]; klovrp_pose_euler_deg(&v, e);
     float pp[3] = { px, py, pz };
     kl_ovrp_ctrl_trace("published", hand, e, pp);
+}
+
+void kl_ovrp_set_hand_pose(int hand, float px, float py, float pz,
+                           float qx, float qy, float qz, float qw) {
+    kl_ovrp_set_hand_pose_at(hand, px, py, pz, qx, qy, qz, qw, 0);
 }
 
 // Is the velocity in the latched hand sample a measurement, or is it the

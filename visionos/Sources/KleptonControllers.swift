@@ -1854,7 +1854,7 @@ final class KleptonControllers {
     /// `presentationTime` is when the frame being built will be shown. Every
     /// pose here is predicted to it, so the controllers move at display rate
     /// and describe the same instant the head pose does.
-    func update(leftHand: HandAnchor?, rightHand: HandAnchor?,
+    func update(leftHand: HandAnchor?, rightHand: HandAnchor?, trackingTransform: GuestTrackingTransform?,
                 at presentationTime: TimeInterval) {
         pollButtons()
 
@@ -1935,12 +1935,20 @@ final class KleptonControllers {
             }
 
             if let p = st.position, let q = st.orientation {
-                kl_ovrp_set_hand_motion(Int32(hand), p.x, p.y, p.z,
-                                        q.imag.x, q.imag.y, q.imag.z, q.real,
-                                        st.linearVelocity.x, st.linearVelocity.y,
-                                        st.linearVelocity.z,
-                                        st.angularVelocity.x, st.angularVelocity.y,
-                                        st.angularVelocity.z)
+                if let trackingTransform {
+                    let (p, q) = trackingTransform.pose((p, q))
+                    // Differentiate in guest space so movement of the virtual
+                    // tracking origin also contributes to hand velocity.
+                    kl_ovrp_set_hand_pose_at(Int32(hand), p.x, p.y, p.z,
+                                            q.imag.x, q.imag.y, q.imag.z, q.real, presentationTime)
+                } else {
+                    kl_ovrp_set_hand_motion(Int32(hand), p.x, p.y, p.z,
+                                            q.imag.x, q.imag.y, q.imag.z, q.real,
+                                            st.linearVelocity.x, st.linearVelocity.y,
+                                            st.linearVelocity.z,
+                                            st.angularVelocity.x, st.angularVelocity.y,
+                                            st.angularVelocity.z)
+                }
             }
             kl_ovrp_set_controller_input(Int32(hand), st.buttons, st.touches,
                                          st.indexTrigger, st.handTrigger,

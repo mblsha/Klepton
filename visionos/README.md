@@ -69,6 +69,14 @@ apps embed *different* guest frameworks, so pointing one at the other's target
 stops at `kl_app_configure` with "missing guest libraries" rather than
 misbehaving.
 
+`gamepad_camera` lets an opted-in target use a standard extended gamepad's
+left stick for movement and right stick for yaw and pitch. Forward and back
+follow the camera's pitch, and side-to-side movement stays level. Hold
+either trigger for double movement speed, or both for quadruple speed. Click
+the right stick to reset the gamepad's position and look offsets. The guest's
+head and hands share those offsets and continue to track physical motion.
+`KL_GAMEPAD_CAMERA=0` disables the feature for an opted-in game.
+
 ## What lives where, and why
 
 |  | where | why |

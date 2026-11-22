@@ -71,6 +71,10 @@ void kl_ovrp_set_head_pose_tag(uint64_t tag);
 // same thread. A frontend that never calls this keeps the call-time behaviour.
 void kl_ovrp_set_head_pose_time(double t);
 
+// Call from the pose publisher before a discontinuous tracking-space change.
+// The next head and hand poses start new velocity histories.
+void kl_ovrp_reset_motion_history(void);
+
 // The pose the FRONTEND last published — where the head is now, including the
 // standing-eye-height default a headless run gets. This is the display side's
 // number: the viewer's composite reprojects towards it. It is deliberately not
@@ -152,6 +156,9 @@ int kl_ovrp_head_predict_delta(double time_s, float *quat4, float *pos3);
 
 void kl_ovrp_set_hand_pose(int hand, float px, float py, float pz,
                            float qx, float qy, float qz, float qw);
+// Publish on the provider's prediction clock for velocity derivation.
+void kl_ovrp_set_hand_pose_at(int hand, float px, float py, float pz,
+                              float qx, float qy, float qz, float qw, double time_s);
 
 // ...and the same pose WITH its motion. ovrpPoseStatef carries velocity and
 // angular velocity beside the pose (kl_ovrp.c documents the layout), libunity

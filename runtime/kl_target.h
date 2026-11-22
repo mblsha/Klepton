@@ -86,6 +86,7 @@ typedef struct {
     // — and both engines report a missing OBB by carrying on.
     const char *obb;
     kl_guest_kind kind;
+    int gamepad_camera;     // ordinary gamepad sticks drive the tracking origin
 } kl_target;
 
 // NULL if the name is not in the table. `kl_target_names()` is for the error
