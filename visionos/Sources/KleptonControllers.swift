@@ -443,12 +443,15 @@ final class KleptonControllers {
 
     private func publishBareHand(_ hand: Int, position: SIMD3<Float>?,
                                  orientation: simd_quatf?, sample: BareHandGestures.Sample?,
-                                 at time: TimeInterval, touchBasis: Bool = false) {
+                                 trackingTransform: GuestTrackingTransform?, at time: TimeInterval,
+                                 touchBasis: Bool = false) {
         var input = KleptonHandState()
-        if let p = position, let q = orientation,
-           p.x.isFinite, p.y.isFinite, p.z.isFinite, q.length.isFinite, q.length > 0.001,
+        if let position, let orientation,
+           position.x.isFinite, position.y.isFinite, position.z.isFinite,
+           orientation.length.isFinite, orientation.length > 0.001,
            let controls = bareHandGestures?[hand].update(sample, at: time) {
             pinchHeld[hand] = controls.trigger
+            let (p, q) = trackingTransform?.pose((position, orientation)) ?? (position, orientation)
             let rotation = simd_normalize(q)
             if touchBasis {
                 kl_ovrp_set_touch_hand_pose_at(Int32(hand), p.x, p.y, p.z,
@@ -510,11 +513,11 @@ final class KleptonControllers {
     #if targetEnvironment(simulator)
     func replayBareHand(_ hand: Int, position: SIMD3<Float>?, orientation: simd_quatf?,
                         sample: BareHandGestures.Sample?, palm: BareHandPalmCalibration.Palm?,
-                        at time: TimeInterval) {
+                        trackingTransform: GuestTrackingTransform?, at time: TimeInterval) {
         guard bareHandGestures != nil else { return }
         let fit = palm.flatMap { palmCalibration?.touchPose($0, hand: hand) }
         publishBareHand(hand, position: fit?.0 ?? position, orientation: fit?.1 ?? orientation,
-                        sample: sample, at: time, touchBasis: fit != nil)
+                        sample: sample, trackingTransform: trackingTransform, at: time, touchBasis: fit != nil)
     }
     #endif
     // 0 = left, 1 = right, matching kl_ovrp's hand indices (nodes 3 and 4).
@@ -1956,7 +1959,7 @@ final class KleptonControllers {
     /// `presentationTime` is when the frame being built will be shown. Every
     /// pose here is predicted to it, so the controllers move at display rate
     /// and describe the same instant the head pose does.
-    func update(leftHand: HandAnchor?, rightHand: HandAnchor?,
+    func update(leftHand: HandAnchor?, rightHand: HandAnchor?, trackingTransform: GuestTrackingTransform?,
                 at presentationTime: TimeInterval) {
         pollButtons()
 
@@ -1975,8 +1978,8 @@ final class KleptonControllers {
                 let fit = anchor.flatMap { alignedBareHandPose($0, hand: hand) }
                 let pose = fit ?? anchor.map { gripPose($0, hand: hand) }
                 publishBareHand(hand, position: pose?.0, orientation: pose?.1,
-                                     sample: anchor.flatMap { Self.bareHandSample($0) }, at: presentationTime,
-                                     touchBasis: fit != nil)
+                                sample: anchor.flatMap { Self.bareHandSample($0) },
+                                trackingTransform: trackingTransform, at: presentationTime, touchBasis: fit != nil)
                 continue
             } else if let anchor = (hand == 0 ? leftHand : rightHand) {
                 let (p, q) = gripPose(anchor, hand: hand)
@@ -2047,12 +2050,20 @@ final class KleptonControllers {
             }
 
             if let p = st.position, let q = st.orientation {
-                kl_ovrp_set_hand_motion(Int32(hand), p.x, p.y, p.z,
-                                        q.imag.x, q.imag.y, q.imag.z, q.real,
-                                        st.linearVelocity.x, st.linearVelocity.y,
-                                        st.linearVelocity.z,
-                                        st.angularVelocity.x, st.angularVelocity.y,
-                                        st.angularVelocity.z)
+                if let trackingTransform {
+                    let (p, q) = trackingTransform.pose((p, q))
+                    // Differentiate in guest space so movement of the virtual
+                    // tracking origin also contributes to hand velocity.
+                    kl_ovrp_set_hand_pose_at(Int32(hand), p.x, p.y, p.z,
+                                            q.imag.x, q.imag.y, q.imag.z, q.real, presentationTime)
+                } else {
+                    kl_ovrp_set_hand_motion(Int32(hand), p.x, p.y, p.z,
+                                            q.imag.x, q.imag.y, q.imag.z, q.real,
+                                            st.linearVelocity.x, st.linearVelocity.y,
+                                            st.linearVelocity.z,
+                                            st.angularVelocity.x, st.angularVelocity.y,
+                                            st.angularVelocity.z)
+                }
             }
             kl_ovrp_set_controller_input(Int32(hand), st.buttons, st.touches,
                                          st.indexTrigger, st.handTrigger,

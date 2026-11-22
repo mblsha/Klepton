@@ -126,6 +126,7 @@ const char *kl_app_target_name(void);
 const char *kl_app_target_name_or_default(void);
 // The configured target's optional bare-hand controller profile ID.
 const char *kl_app_target_bare_hand_profile(void);
+int kl_app_target_gamepad_camera(void);
 int         kl_app_target_is_steamlink(void);
 // Whether this target should open the immersive space FULLY immersive by default
 // (no passthrough) rather than .mixed. True for the native OpenXR VR kind
