@@ -561,7 +561,7 @@ final class KleptonControllers {
     // MARK: - Discovery
 
     /// Sample a standard gamepad without consuming either spatial controller's stick.
-    static func gamepadCameraAxes() -> GamepadCamera.Axes {
+    static func gamepadCameraInput() -> GamepadCamera.Input {
         let pads = GCController.controllers().filter { controller in
             guard controller.extendedGamepad != nil else { return false }
             if #available(visionOS 26.0, *), controller.productCategory == GCProductCategorySpatialController {
@@ -574,7 +574,9 @@ final class KleptonControllers {
             return .init()
         }
         return .init(move: SIMD2(gamepad.leftThumbstick.xAxis.value, gamepad.leftThumbstick.yAxis.value),
-                     look: SIMD2(gamepad.rightThumbstick.xAxis.value, gamepad.rightThumbstick.yAxis.value))
+                     look: SIMD2(gamepad.rightThumbstick.xAxis.value, gamepad.rightThumbstick.yAxis.value),
+                     leftTrigger: gamepad.leftTrigger.isPressed, rightTrigger: gamepad.rightTrigger.isPressed,
+                     reset: gamepad.rightThumbstickButton?.isPressed == true)
     }
 
     /// The spatial controllers paired right now.

@@ -23,9 +23,20 @@ struct CameraTrackingTransform {
 }
 
 struct GamepadCamera {
-    struct Axes {
+    struct Input {
         var move: SIMD2<Float> = .zero
         var look: SIMD2<Float> = .zero
+        var leftTrigger = false
+        var rightTrigger = false
+        var reset = false
+
+        var speedMultiplier: Float {
+            switch (leftTrigger, rightTrigger) {
+            case (true, true): return 4
+            case (false, false): return 1
+            default: return 2
+            }
+        }
     }
 
     private static let deadZone: Float = 0.18
@@ -41,8 +52,16 @@ struct GamepadCamera {
     private var physicalYaw: Float = 0
     private var offset: SIMD3<Float> = .zero
 
-    mutating func update(_ axes: Axes, physicalHead: simd_float4x4,
+    mutating func update(_ input: Input, physicalHead: simd_float4x4,
                          at time: TimeInterval) -> CameraTrackingTransform? {
+        if input.reset {
+            yaw = 0
+            pitch = 0
+            offset = .zero
+            previousTime = time
+            return nil
+        }
+
         let head = SIMD3<Float>(physicalHead.columns.3.x, physicalHead.columns.3.y,
                                physicalHead.columns.3.z)
         let back = physicalHead.columns.2
@@ -52,8 +71,8 @@ struct GamepadCamera {
 
         if let previousTime, time > previousTime, time - previousTime <= 0.1 {
             let dt = Float(time - previousTime)
-            let look = Self.filtered(axes.look)
-            let move = Self.filtered(axes.move)
+            let look = Self.filtered(input.look)
+            let move = Self.filtered(input.move)
             let oldYaw = simd_quatf(angle: yaw, axis: Self.up)
             yaw = (yaw - look.x * Self.yawSpeed * dt).remainder(dividingBy: 2 * .pi)
             pitch = min(Self.pitchLimit, max(-Self.pitchLimit, pitch + look.y * Self.pitchSpeed * dt))
@@ -62,7 +81,8 @@ struct GamepadCamera {
             // Turn around the current head position, even when the player has
             // walked away from ARKit's origin. Walk along the view's horizontal plane.
             offset += oldYaw.act(head) - newYaw.act(head)
-            offset += heading.act(SIMD3(move.x, 0, -move.y)) * (Self.walkSpeed * dt)
+            let travel = Self.walkSpeed * input.speedMultiplier * dt
+            offset += heading.act(SIMD3(move.x, 0, -move.y)) * travel
         }
         previousTime = time
 

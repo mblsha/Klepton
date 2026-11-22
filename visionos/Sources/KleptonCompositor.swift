@@ -338,6 +338,7 @@ final class KleptonCompositor {
     private var arRunning = false
     private var gamepadCamera: GamepadCamera?
     private var cameraTransform: CameraTrackingTransform?
+    private var lastCameraPoseTag: UInt64 = 0
 
     // How much work reprojection is doing, sampled for the log.
     private var reprojectFrames = 0
@@ -681,6 +682,11 @@ final class KleptonCompositor {
         repeating: nil, count: poseAnchorRing)
     private var poseTag: UInt64 = 0
 
+    private func canUseSystemWarp(forPoseTag tag: UInt64) -> Bool {
+        // A frame from before a reset can still be on screen after the offset clears.
+        Self.warpBySystem && cameraTransform == nil && (lastCameraPoseTag == 0 || tag > lastCameraPoseTag)
+    }
+
     private func poseAnchor(tag: UInt64) -> DeviceAnchor? {
         guard tag != 0 else { return nil }
         let slot = poseAnchors[Int(tag % UInt64(Self.poseAnchorRing))]
@@ -722,8 +728,10 @@ final class KleptonCompositor {
             // be stated about one origin or every near object sits wrong.
             let head = Self.headFrom(anchor.originFromAnchorTransform, midpoint: eyeMidpointInDevice)
             if gamepadCamera != nil {
-                let axes = KleptonControllers.gamepadCameraAxes()
-                cameraTransform = gamepadCamera?.update(axes, physicalHead: head, at: presentationTime)
+                let input = KleptonControllers.gamepadCameraInput()
+                if input.reset, cameraTransform != nil { kl_ovrp_reset_motion_history() }
+                cameraTransform = gamepadCamera?.update(input, physicalHead: head, at: presentationTime)
+                if cameraTransform != nil { lastCameraPoseTag = poseTag }
                 Self.cameraPredictionLock.withLock { Self.cameraTransformForPrediction = cameraTransform }
             }
             let physical = Self.decompose(head)
@@ -2112,7 +2120,7 @@ final class KleptonCompositor {
         // means the display anchor and the correction we always did.
         // A physical anchor cannot describe gamepad motion. Reproject that
         // motion here and continue giving the system a physical display anchor.
-        let systemWarp = Self.warpBySystem && cameraTransform == nil
+        let systemWarp = canUseSystemWarp(forPoseTag: rendered.pose_tag)
         let renderAnchor = systemWarp && haveRendered
             ? poseAnchor(tag: rendered.pose_tag) : nil
         let drawableAnchor = renderAnchor ?? displayAnchor
@@ -4543,7 +4551,7 @@ final class KleptonCompositor {
                 presentMispairs += 1
                 presentWorstMispair = max(presentWorstMispair, live - r.stage_epoch)
             }
-            if Self.warpBySystem && cameraTransform == nil && !anchorHit { presentAnchorMisses += 1 }
+            if canUseSystemWarp(forPoseTag: r.pose_tag) && !anchorHit { presentAnchorMisses += 1 }
             lastPresentedRecord = r
         } else {
             presentNoRecord += 1

@@ -2575,6 +2575,12 @@ typedef struct {
 } klovrp_motion_hist;
 static klovrp_motion_hist g_head_hist, g_hand_hist[2];
 
+void kl_ovrp_reset_motion_history(void) {
+    g_head_hist.have = 0;
+    g_hand_hist[0].have = 0;
+    g_hand_hist[1].have = 0;
+}
+
 static double klovrp_mono_now(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);

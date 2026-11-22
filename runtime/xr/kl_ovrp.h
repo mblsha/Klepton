@@ -71,6 +71,10 @@ void kl_ovrp_set_head_pose_tag(uint64_t tag);
 // same thread. A frontend that never calls this keeps the call-time behaviour.
 void kl_ovrp_set_head_pose_time(double t);
 
+// Call from the pose publisher before a discontinuous tracking-space change.
+// The next head and hand poses start new velocity histories.
+void kl_ovrp_reset_motion_history(void);
+
 // The pose the FRONTEND last published — where the head is now, including the
 // standing-eye-height default a headless run gets. This is the display side's
 // number: the viewer's composite reprojects towards it. It is deliberately not

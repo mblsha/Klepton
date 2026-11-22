@@ -30,6 +30,16 @@ enum GamepadCameraTest {
         near(walk.update(.init(), physicalHead: physical, at: 1.10)!.point(head), translated)
         near(walk.update(.init(move: SIMD2(0, 1)), physicalHead: physical, at: 3)!.point(head), translated)
 
+        for (left, right, multiplier) in [(true, false, Float(2)), (false, true, 2), (true, true, 4)] {
+            var boosted = GamepadCamera()
+            _ = boosted.update(.init(), physicalHead: physical, at: 0)
+            let input = GamepadCamera.Input(move: SIMD2(0, 1), leftTrigger: left, rightTrigger: right)
+            for frame in 1...60 {
+                space = boosted.update(input, physicalHead: physical, at: Double(frame) / 60)
+            }
+            near(space!.point(head), head + physicalYaw.act(forward) * (0.85 * multiplier))
+        }
+
         var turn = GamepadCamera()
         _ = turn.update(.init(), physicalHead: physical, at: 0)
         let hand = head + SIMD3<Float>(0.2, -0.4, -0.6)
@@ -54,6 +64,18 @@ enum GamepadCameraTest {
         physical.columns.3.x += 1
         let afterPhysicalStep = turn.update(.init(), physicalHead: physical, at: 3.05)!
         precondition(abs(afterPhysicalStep.point(head + SIMD3(1, 0, 0)).y - head.y) < 0.0001)
-        print("PASS: dead zone, horizontal movement, yaw and pitch, tracked hand registration, disconnect and resume")
+
+        let move = GamepadCamera.Input(move: SIMD2(0, 1), look: SIMD2(1, 0), rightTrigger: true)
+        precondition(turn.update(move, physicalHead: physical, at: 3.1) != nil)
+        var reset = move
+        reset.reset = true
+        precondition(turn.update(reset, physicalHead: physical, at: 3.15) == nil)
+        precondition(turn.update(reset, physicalHead: physical, at: 3.2) == nil)
+        precondition(turn.update(.init(), physicalHead: physical, at: 3.25) == nil)
+        let afterReset = turn.update(.init(move: SIMD2(0, 1)), physicalHead: physical, at: 3.3)!
+        let movedHead = head + SIMD3<Float>(1, 0, 0)
+        near(afterReset.point(movedHead), movedHead + physicalYaw.act(forward) * (0.85 * 0.05))
+        near(afterReset.rotation.act(forward), forward)
+        print("PASS: dead zone, movement and look, boost tiers, tracked hand registration, disconnect, resume and reset")
     }
 }
