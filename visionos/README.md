@@ -75,6 +75,11 @@ profile use the existing hand input behavior. `KL_BARE_HANDS=0` disables an
 assigned profile, and `KL_BARE_HAND_ALIGN=1` enables its palm calibration
 when one is provided. Physical controllers retain priority per hand.
 
+`gamepad_camera` lets an opted-in target use a standard extended gamepad's
+left stick for horizontal movement and right stick for yaw and pitch. This
+offsets the guest's head and hands together while retaining physical tracking.
+`KL_GAMEPAD_CAMERA=0` disables the feature for an opted-in game.
+
 ## What lives where, and why
 
 |  | where | why |

@@ -76,6 +76,9 @@ const char *kl_app_target_name_or_default(void) {
 const char *kl_app_target_bare_hand_profile(void) {
     return g_target ? g_target->bare_hand_profile : NULL;
 }
+int kl_app_target_gamepad_camera(void) {
+    return g_target && g_target->gamepad_camera;
+}
 int kl_app_target_is_steamlink(void) {
     return g_target && g_target->kind == KL_GUEST_STEAMLINK;
 }
